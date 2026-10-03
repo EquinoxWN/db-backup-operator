@@ -1,0 +1,22 @@
+# Nightly WAL-G base backup of the orders database primary.
+#
+# The database container must already run with WAL-G configured, because PostgreSQL's
+# archive_command needs it too:
+#   archive_mode = on
+#   archive_command = 'wal-g wal-push %p'
+#   environment: WALG_S3_PREFIX=s3://backups/orders, AWS_ENDPOINT, AWS_ACCESS_KEY_ID and
+#                AWS_SECRET_ACCESS_KEY from a Secret, PGHOST=/var/run/postgresql
+# The operator only runs `wal-g backup-push` and reads pg_stat_archiver; it never sees credentials.
+apiVersion: dbbackup.equinoxwn.github.io/v1alpha1
+kind: BackupPolicy
+metadata:
+  name: orders-db
+  namespace: databases
+spec:
+  selector:
+    app: orders-db
+    role: primary
+  container: postgres
+  postgresUser: postgres
+  dataDir: /var/lib/postgresql/data
+  schedule: "0 2 * * *" # 02:00 UTC every day

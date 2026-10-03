@@ -1,0 +1,36 @@
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: db-backup-operator
+rules:
+- apiGroups:
+  - ""
+  resources:
+  - pods
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - ""
+  resources:
+  - pods/exec
+  verbs:
+  - create
+- apiGroups:
+  - dbbackup.equinoxwn.github.io
+  resources:
+  - backuppolicies
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - dbbackup.equinoxwn.github.io
+  resources:
+  - backuppolicies/status
+  verbs:
+  - get
+  - patch
+  - update

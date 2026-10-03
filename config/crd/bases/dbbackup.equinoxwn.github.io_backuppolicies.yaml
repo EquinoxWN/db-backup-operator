@@ -1,0 +1,229 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.20.1
+  name: backuppolicies.dbbackup.equinoxwn.github.io
+spec:
+  group: dbbackup.equinoxwn.github.io
+  names:
+    kind: BackupPolicy
+    listKind: BackupPolicyList
+    plural: backuppolicies
+    shortNames:
+    - bp
+    singular: backuppolicy
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.schedule
+      name: Schedule
+      type: string
+    - jsonPath: .status.lastSuccessfulBackupTime
+      name: Last success
+      type: date
+    - jsonPath: .status.conditions[?(@.type=="Ready")].status
+      name: Ready
+      type: string
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: BackupPolicy schedules WAL-G base backups of one PostgreSQL primary
+          and checks WAL archiving.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: |-
+              BackupPolicySpec says which PostgreSQL primary to back up and when.
+
+              WAL-G itself is configured inside the database container (WALG_S3_PREFIX and storage
+              credentials), where PostgreSQL's archive_command also needs it; the operator never sees
+              storage credentials.
+            properties:
+              container:
+                default: postgres
+                description: Container in that pod that has wal-g and psql installed.
+                pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                type: string
+              dataDir:
+                default: /var/lib/postgresql/data
+                description: DataDir is PGDATA inside the container.
+                pattern: ^/[A-Za-z0-9_./-]*$
+                type: string
+              postgresUser:
+                default: postgres
+                description: PostgresUser is the database role psql uses to read archiver
+                  statistics.
+                pattern: ^[A-Za-z_][A-Za-z0-9_]{0,62}$
+                type: string
+              schedule:
+                description: Schedule for base backups in standard five-field cron
+                  format, in UTC.
+                minLength: 9
+                type: string
+              selector:
+                additionalProperties:
+                  type: string
+                description: Selector matches the pod running the PostgreSQL primary;
+                  exactly one running pod must match.
+                minProperties: 1
+                type: object
+              suspend:
+                description: Suspend stops new backups without deleting the policy.
+                type: boolean
+            required:
+            - schedule
+            - selector
+            type: object
+          status:
+            description: BackupPolicyStatus is what the controller observed.
+            properties:
+              conditions:
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - type
+                x-kubernetes-list-type: map
+              history:
+                description: History holds the most recent backup attempts, newest
+                  first.
+                items:
+                  description: BackupRecord is one attempted base backup.
+                  properties:
+                    completionTime:
+                      format: date-time
+                      type: string
+                    message:
+                      description: Message holds the tail of the error output when
+                        the run failed.
+                      type: string
+                    result:
+                      description: Result is Succeeded or Failed.
+                      type: string
+                    scheduledTime:
+                      description: ScheduledTime is the cron time this run belongs
+                        to.
+                      format: date-time
+                      type: string
+                    startTime:
+                      description: StartTime and CompletionTime bracket the wal-g
+                        run.
+                      format: date-time
+                      type: string
+                  required:
+                  - completionTime
+                  - result
+                  - scheduledTime
+                  - startTime
+                  type: object
+                type: array
+              lastScheduleTime:
+                format: date-time
+                type: string
+              lastSuccessfulBackupTime:
+                format: date-time
+                type: string
+              nextScheduleTime:
+                format: date-time
+                type: string
+              observedGeneration:
+                format: int64
+                type: integer
+              walArchive:
+                description: WALArchiveStatus mirrors PostgreSQL's pg_stat_archiver
+                  view.
+                properties:
+                  archivedCount:
+                    format: int64
+                    type: integer
+                  failedCount:
+                    format: int64
+                    type: integer
+                  lastArchivedTime:
+                    type: string
+                  lastArchivedWal:
+                    type: string
+                  lastFailedTime:
+                    type: string
+                required:
+                - archivedCount
+                - failedCount
+                type: object
+            type: object
+        required:
+        - spec
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}
