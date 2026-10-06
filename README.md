@@ -7,6 +7,12 @@
 
 Part of my **DevOps and Cloud** list · Go · core project
 
+## Proof it works
+
+The reconciler's unit tests pass with a fake API client and pod executor (schedule, catch-up after missed runs, failures recorded, exactly one primary, suspend, WAL archiving, UTC schedules). The three envtest tests need a real kube-apiserver and run in CI on Linux. govulncheck finds nothing with Go 1.26.8:
+
+![go vet, go test and govulncheck output](docs/proof/tests.jpg)
+
 ## Architecture
 
 **What M1 runs today:**
@@ -59,7 +65,7 @@ Language: **Go** (controller-runtime 0.23, Kubernetes 1.35 libraries), code and 
 
 ## Run it
 
-Needs Go 1.25+. No Docker or cluster for the tests.
+Needs Go 1.26+. No Docker or cluster for the tests.
 
 ```bash
 make setup      # go mod download

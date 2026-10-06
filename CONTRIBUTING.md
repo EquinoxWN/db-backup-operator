@@ -4,7 +4,7 @@ Thanks for helping. This is a Go project; issues and pull requests are welcome.
 
 ## Set up and check your change
 
-Needs Go 1.25+. Caches and virtual environments stay in git-ignored folders inside the repo.
+Needs Go 1.26+. Caches and virtual environments stay in git-ignored folders inside the repo.
 
 ```bash
 make setup   # install dependencies
