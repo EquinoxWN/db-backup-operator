@@ -44,6 +44,12 @@ _Steps 1 and 2 are built and tested (M1); the rest is on the [roadmap](#roadmap)
 5. Retention deletes an old backup only after a newer one has passed verification; finalizers clean up when the policy is removed.
 6. Status conditions, events and metrics report every backup and drill; a kind e2e suite deletes the database and restores it automatically.
 
+## Who it helps
+
+- **Who:** Teams running PostgreSQL on Kubernetes.
+- **The problem:** Backups fail or stop quietly, and nobody notices until a restore is needed.
+- **How to use it:** Declare a `BackupPolicy` and the operator runs scheduled WAL-G backups, checks that WAL archiving works and records each result in the resource's status; automated restore drills are the next milestone.
+
 ## Tech stack
 
 | Area | In M1 | Planned |
