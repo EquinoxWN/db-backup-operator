@@ -9,7 +9,7 @@ Part of my **DevOps and Cloud** list · Go · core project
 
 ## Proof it works
 
-The reconciler's unit tests pass with a fake API client and pod executor (schedule, catch-up after missed runs, failures recorded, exactly one primary, suspend, WAL archiving, UTC schedules). The three envtest tests need a real kube-apiserver and run in CI on Linux. govulncheck finds nothing with Go 1.26.8:
+The reconciler's unit tests pass with a fake API client and pod executor (schedule, catch-up after missed runs, failures recorded, exactly one primary, suspend, WAL archiving, UTC schedules). The three envtest tests need a real kube-apiserver and run in CI on Linux. govulncheck finds nothing with Go 1.26.10:
 
 ![go vet, go test and govulncheck output](docs/proof/tests.jpg)
 
