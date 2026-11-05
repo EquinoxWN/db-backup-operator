@@ -9,7 +9,7 @@ Part of my **DevOps and Cloud** list · Go · core project
 
 ## Proof it works
 
-The reconciler's unit tests pass with a fake API client and pod executor (schedule, catch-up after missed runs, failures recorded, exactly one primary, suspend, WAL archiving, UTC schedules). The three envtest tests need a real kube-apiserver and run in CI on Linux. govulncheck finds nothing with Go 1.26.10:
+The reconciler's 13 unit tests pass with a fake API client and pod executor (schedule, catch-up after missed runs, failures recorded, exactly one primary, suspend, WAL archiving, UTC schedules). The three envtest tests need a real kube-apiserver and run in CI on Linux. govulncheck finds nothing with Go 1.26.10 (the screenshot is from the M1 run, before the 2026-11-01 quality pass added 2 unit tests and 4 table cases):
 
 ![go vet, go test and govulncheck output](docs/proof/tests.jpg)
 
@@ -90,7 +90,7 @@ Latest local run (full detail in [docs/results/m1.md](docs/results/m1.md)):
 
 | Check | Result |
 |---|---|
-| Reconciler unit tests: schedule, catch-up, failure, missing primary, suspend, WAL archiving states, time zone | 11 passed, 0 failed |
+| Reconciler unit tests: schedule, catch-up, failure, missing primary, suspend, WAL archiving states, time zone, status write conflict | 13 passed, 0 failed (envtest and `-race` run in CI on Linux) |
 | Real API server (envtest, Kubernetes 1.35): defaults, 6 invalid or injection-shaped policies rejected, status writes, sample manifest | 3 passed, 0 failed |
 | Bug found by the tests | Schedules ran in local time instead of UTC; fixed, with a regression test that fails if the bug returns |
 | Generated RBAC | only `backuppolicies` (+status), `pods` read and `pods/exec` |
@@ -101,9 +101,10 @@ M1 takes backups and checks archiving; it does **not** yet prove a backup restor
 
 ```mermaid
 mindmap
-  root((14 tests pass))
+  root((16 tests pass))
     Scheduling
       nothing runs early
+      runs at the exact scheduled second
       exact requeue time
       missed runs collapse to one
       UTC whatever the local zone
@@ -114,8 +115,10 @@ mindmap
       failures recorded and truncated
       history keeps the 10 newest
       no single primary means retry
+      status conflict does not repeat a backup
     WAL archiving
       healthy, never, failed states
+      malformed psql output rejected
       psql errors reported
     Real API server
       defaults applied
@@ -161,6 +164,7 @@ What this repo must show before it counts as done:
 - [ADR 0001: record architecture decisions](docs/adr/0001-record-architecture-decisions.md)
 - [ADR 0002: run WAL-G inside the primary through pod exec, keep credentials out](docs/adr/0002-exec-into-primary-for-backups.md)
 - [M1 results](docs/results/m1.md)
+- [Quality check against the 10 rules (2026-11-01)](docs/quality/2026-11-01.md)
 
 ## Scope
 
