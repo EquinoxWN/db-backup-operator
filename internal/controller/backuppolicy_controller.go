@@ -8,8 +8,10 @@ import (
 
 	"github.com/robfig/cron/v3"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/util/retry"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
@@ -87,10 +89,26 @@ func (r *BackupPolicyReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	p.Status.LastScheduleTime = &metav1.Time{Time: due}
 	p.Status.NextScheduleTime = &metav1.Time{Time: next}
 	setCondition(&p, backupv1.ConditionReady, true, "Scheduled", "next backup at "+next.Format(time.RFC3339))
-	if err := r.Status().Update(ctx, &p); err != nil {
+	if err := r.saveStatus(ctx, &p); err != nil {
 		return ctrl.Result{}, err
 	}
 	return ctrl.Result{RequeueAfter: max(next.Sub(r.Now().UTC()), time.Second)}, nil
+}
+
+// saveStatus writes the status of a run that already happened; on a conflict it re-reads the policy
+// and writes again, so the run is recorded once instead of being retried as a new backup.
+func (r *BackupPolicyReconciler) saveStatus(ctx context.Context, p *backupv1.BackupPolicy) error {
+	status := p.Status
+	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		err := r.Status().Update(ctx, p)
+		if apierrors.IsConflict(err) {
+			if getErr := r.Get(ctx, client.ObjectKeyFromObject(p), p); getErr != nil {
+				return getErr
+			}
+			p.Status = status
+		}
+		return err
+	})
 }
 
 // backup runs wal-g backup-push and records the outcome in status.

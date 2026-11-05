@@ -8,29 +8,34 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
 	backupv1 "github.com/EquinoxWN/db-backup-operator/api/v1alpha1"
 )
 
 // fakeExec records commands and answers wal-g and psql with canned results.
 type fakeExec struct {
-	calls     [][]string
-	pods      []string
-	backupErr error
-	psqlOut   string
-	psqlErr   error
+	calls      [][]string
+	pods       []string
+	containers []string
+	backupErr  error
+	psqlOut    string
+	psqlErr    error
 }
 
-func (f *fakeExec) Exec(_ context.Context, _, pod, _ string, cmd []string) (string, error) {
+func (f *fakeExec) Exec(_ context.Context, _, pod, container string, cmd []string) (string, error) {
 	f.calls = append(f.calls, cmd)
+	f.containers = append(f.containers, container)
 	f.pods = append(f.pods, pod)
 	if cmd[0] == "wal-g" {
 		return "", f.backupErr
@@ -68,6 +73,13 @@ func pod(name string, phase corev1.PodPhase) *corev1.Pod {
 	}
 }
 
+// terminating marks a pod as being deleted (a finalizer keeps it visible).
+func terminating(p *corev1.Pod) *corev1.Pod {
+	p.DeletionTimestamp = &metav1.Time{Time: created}
+	p.Finalizers = []string{"example.com/hold"}
+	return p
+}
+
 type harness struct {
 	r    *BackupPolicyReconciler
 	exec *fakeExec
@@ -76,9 +88,14 @@ type harness struct {
 
 func newHarness(t *testing.T, objs ...client.Object) *harness {
 	t.Helper()
+	return newHarnessWith(t, interceptor.Funcs{}, objs...)
+}
+
+func newHarnessWith(t *testing.T, funcs interceptor.Funcs, objs ...client.Object) *harness {
+	t.Helper()
 	h := &harness{exec: &fakeExec{psqlOut: healthyArchiver}}
 	c := fake.NewClientBuilder().WithScheme(newScheme(t)).WithObjects(objs...).
-		WithStatusSubresource(&backupv1.BackupPolicy{}).Build()
+		WithStatusSubresource(&backupv1.BackupPolicy{}).WithInterceptorFuncs(funcs).Build()
 	h.r = &BackupPolicyReconciler{Client: c, Exec: h.exec, Now: func() time.Time { return h.now }}
 	return h
 }
@@ -121,7 +138,7 @@ func TestRunsWalgBackupPushInThePrimaryWhenDue(t *testing.T) {
 	h.now = time.Date(2026, 10, 2, 2, 0, 5, 0, time.UTC)
 	res, p := h.reconcile(t)
 	want := []string{"wal-g", "backup-push", "/var/lib/postgresql/data"}
-	if len(h.exec.calls) < 1 || strings.Join(h.exec.calls[0], " ") != strings.Join(want, " ") || h.exec.pods[0] != "pg-0" {
+	if len(h.exec.calls) < 1 || strings.Join(h.exec.calls[0], " ") != strings.Join(want, " ") || h.exec.pods[0] != "pg-0" || h.exec.containers[0] != "postgres" {
 		t.Fatalf("calls = %v on %v, want %v on pg-0", h.exec.calls, h.exec.pods, want)
 	}
 	if p.Status.LastSuccessfulBackupTime == nil || len(p.Status.History) != 1 || p.Status.History[0].Result != "Succeeded" {
@@ -140,7 +157,7 @@ func TestRunsWalgBackupPushInThePrimaryWhenDue(t *testing.T) {
 
 func TestAFailedBackupIsRecordedAndReported(t *testing.T) {
 	h := newHarness(t, policy("0 2 * * *"), pod("pg-0", corev1.PodRunning))
-	h.exec.backupErr = errors.New("wal-g: command terminated with exit code 1: " + strings.Repeat("x", 2000))
+	h.exec.backupErr = errors.New("wal-g: command terminated with exit code 1: " + strings.Repeat("x", 2000) + " disk full")
 	h.now = time.Date(2026, 10, 2, 2, 0, 5, 0, time.UTC)
 	_, p := h.reconcile(t)
 	c := condition(p, backupv1.ConditionBackupSucceeded)
@@ -152,6 +169,9 @@ func TestAFailedBackupIsRecordedAndReported(t *testing.T) {
 	}
 	if len(c.Message) > maxMessage || len(p.Status.History[0].Message) > maxMessage {
 		t.Fatal("error output must be truncated in status")
+	}
+	if !strings.HasSuffix(c.Message, " disk full") {
+		t.Fatalf("truncation must keep the end of the error, where the cause is: %q", c.Message)
 	}
 }
 
@@ -182,6 +202,9 @@ func TestHistoryKeepsTheTenNewest(t *testing.T) {
 	for i := 1; i <= 12; i++ {
 		h.now = created.Add(time.Duration(i)*time.Hour + time.Minute)
 		_, p = h.reconcile(t)
+		if want := min(i, historyLimit); len(p.Status.History) != want {
+			t.Fatalf("after %d runs history has %d entries, want %d", i, len(p.Status.History), want)
+		}
 	}
 	if len(p.Status.History) != historyLimit {
 		t.Fatalf("history has %d entries, want %d", len(p.Status.History), historyLimit)
@@ -193,9 +216,10 @@ func TestHistoryKeepsTheTenNewest(t *testing.T) {
 
 func TestPrimaryMustBeExactlyOneRunningPod(t *testing.T) {
 	for name, pods := range map[string][]client.Object{
-		"none":      {pod("pg-0", corev1.PodPending)},
-		"two":       {pod("pg-0", corev1.PodRunning), pod("pg-1", corev1.PodRunning)},
-		"no labels": {},
+		"none":        {pod("pg-0", corev1.PodPending)},
+		"two":         {pod("pg-0", corev1.PodRunning), pod("pg-1", corev1.PodRunning)},
+		"no labels":   {},
+		"terminating": {terminating(pod("pg-0", corev1.PodRunning))},
 	} {
 		t.Run(name, func(t *testing.T) {
 			h := newHarness(t, append([]client.Object{policy("0 2 * * *")}, pods...)...)
@@ -243,11 +267,14 @@ func TestWALArchivingCondition(t *testing.T) {
 		err         error
 		ok          bool
 	}{
-		"healthy":       {out: healthyArchiver, ok: true, reason: "Archiving"},
-		"never":         {out: "0|0|||\n", reason: "NotArchiving"},
-		"latest failed": {out: "7|2|000000010000000000000007|2026-10-02 01:00:00+00|2026-10-02 01:30:00+00\n", reason: "NotArchiving"},
-		"query error":   {err: errors.New("psql: connection refused"), reason: "QueryFailed"},
-		"garbage":       {out: "permission denied", reason: "QueryFailed"},
+		"healthy":                 {out: healthyArchiver, ok: true, reason: "Archiving"},
+		"never":                   {out: "0|0|||\n", reason: "NotArchiving"},
+		"latest failed":           {out: "7|2|000000010000000000000007|2026-10-02 01:00:00+00|2026-10-02 01:30:00+00\n", reason: "NotArchiving"},
+		"query error":             {err: errors.New("psql: connection refused"), reason: "QueryFailed"},
+		"garbage":                 {out: "permission denied", reason: "QueryFailed"},
+		"failed at the same time": {out: "7|2|000000010000000000000007|2026-10-02 01:00:00+00|2026-10-02 01:00:00+00\n", reason: "NotArchiving"},
+		"extra column":            {out: "7|0|000000010000000000000007|2026-10-02 01:00:00+00||x\n", reason: "QueryFailed"},
+		"bad failed_count":        {out: "7|x|000000010000000000000007|2026-10-02 01:00:00+00|\n", reason: "QueryFailed"},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -284,5 +311,36 @@ func TestScheduleIsUTCWhateverTheLocalTimeZone(t *testing.T) {
 	_, p := h.reconcile(t)
 	if got := p.Status.LastScheduleTime.UTC(); !got.Equal(time.Date(2026, 10, 2, 2, 0, 0, 0, time.UTC)) {
 		t.Fatalf("lastScheduleTime = %v, want 02:00 UTC", got)
+	}
+}
+
+func TestRunsAtTheExactScheduledSecond(t *testing.T) {
+	h := newHarness(t, policy("0 2 * * *"), pod("pg-0", corev1.PodRunning))
+	h.now = time.Date(2026, 10, 2, 2, 0, 0, 0, time.UTC)
+	_, p := h.reconcile(t)
+	if len(h.exec.calls) == 0 || !p.Status.LastScheduleTime.Time.Equal(h.now) {
+		t.Fatalf("a run due exactly now must start: calls %v, last %v", h.exec.calls, p.Status.LastScheduleTime)
+	}
+}
+
+func TestAStatusConflictAfterABackupDoesNotRunItAgain(t *testing.T) {
+	conflicts := 0
+	h := newHarnessWith(t, interceptor.Funcs{
+		SubResourceUpdate: func(ctx context.Context, c client.Client, sub string, obj client.Object, opts ...client.SubResourceUpdateOption) error {
+			if conflicts == 0 {
+				conflicts++
+				return apierrors.NewConflict(schema.GroupResource{Group: "dbbackup.equinoxwn.github.io", Resource: "backuppolicies"}, obj.GetName(), errors.New("object was modified"))
+			}
+			return c.SubResource(sub).Update(ctx, obj, opts...)
+		},
+	}, policy("0 2 * * *"), pod("pg-0", corev1.PodRunning))
+	h.now = time.Date(2026, 10, 2, 2, 0, 5, 0, time.UTC)
+	_, p := h.reconcile(t)
+	if conflicts != 1 || p.Status.LastScheduleTime == nil || len(p.Status.History) != 1 {
+		t.Fatalf("conflicts %d, status %+v", conflicts, p.Status)
+	}
+	h.reconcile(t)
+	if n := len(h.exec.calls); n != 2 { // one backup plus one psql query
+		t.Fatalf("the backup ran again after a status conflict: %v", h.exec.calls)
 	}
 }
