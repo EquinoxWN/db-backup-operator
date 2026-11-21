@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"time"
+	"unicode/utf8"
 
 	"github.com/robfig/cron/v3"
 	corev1 "k8s.io/api/core/v1"
@@ -214,10 +215,14 @@ func setCondition(p *backupv1.BackupPolicy, kind string, ok bool, reason, messag
 
 // truncate keeps status messages small.
 func truncate(s string) string {
-	if len(s) > maxMessage {
-		return s[len(s)-maxMessage:]
+	if len(s) <= maxMessage {
+		return s
 	}
-	return s
+	cut := len(s) - maxMessage
+	for cut < len(s) && !utf8.RuneStart(s[cut]) {
+		cut++ // never start inside a multi-byte character
+	}
+	return s[cut:]
 }
 
 // SetupWithManager registers the reconciler.

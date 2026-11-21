@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -342,5 +343,13 @@ func TestAStatusConflictAfterABackupDoesNotRunItAgain(t *testing.T) {
 	h.reconcile(t)
 	if n := len(h.exec.calls); n != 2 { // one backup plus one psql query
 		t.Fatalf("the backup ran again after a status conflict: %v", h.exec.calls)
+	}
+}
+
+func TestTruncateKeepsValidUTF8(t *testing.T) {
+	s := "é" + strings.Repeat("x", maxMessage-1) // the cut falls inside the two-byte é
+	got := truncate(s)
+	if !utf8.ValidString(got) || len(got) > maxMessage {
+		t.Fatalf("truncate(%d bytes) = %d bytes, valid UTF-8 %v", len(s), len(got), utf8.ValidString(got))
 	}
 }

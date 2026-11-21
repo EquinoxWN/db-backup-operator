@@ -9,7 +9,7 @@ Part of my **DevOps and Cloud** list · Go · core project
 
 ## Proof it works
 
-The reconciler's 13 unit tests pass with a fake API client and pod executor (schedule, catch-up after missed runs, failures recorded, exactly one primary, suspend, WAL archiving, UTC schedules). The three envtest tests need a real kube-apiserver and run in CI on Linux. govulncheck finds nothing with Go 1.26.11 (the screenshot is from the M1 run, before the 2026-11-01 quality pass added 2 unit tests and 4 table cases):
+The reconciler's 14 unit tests pass with a fake API client and pod executor (schedule, catch-up after missed runs, failures recorded, exactly one primary, suspend, WAL archiving, UTC schedules). The three envtest tests need a real kube-apiserver and run in CI on Linux. govulncheck finds nothing with Go 1.26.11 (the screenshot is from the M1 run, before the 2026-11-01 quality pass added 2 unit tests and 4 table cases):
 
 ![go vet, go test and govulncheck output](docs/proof/tests.jpg)
 
@@ -90,7 +90,7 @@ Latest local run (full detail in [docs/results/m1.md](docs/results/m1.md)):
 
 | Check | Result |
 |---|---|
-| Reconciler unit tests: schedule, catch-up, failure, missing primary, suspend, WAL archiving states, time zone, status write conflict | 13 passed, 0 failed (envtest and `-race` run in CI on Linux) |
+| Reconciler unit tests: schedule, catch-up, failure, missing primary, suspend, WAL archiving states, time zone, status write conflict, UTF-8-safe message truncation | 14 passed, 0 failed (envtest and `-race` run in CI on Linux) |
 | Real API server (envtest, Kubernetes 1.35): defaults, 6 invalid or injection-shaped policies rejected, status writes, sample manifest | 3 passed, 0 failed |
 | Bug found by the tests | Schedules ran in local time instead of UTC; fixed, with a regression test that fails if the bug returns |
 | Generated RBAC | only `backuppolicies` (+status), `pods` read and `pods/exec` |
@@ -101,7 +101,7 @@ M1 takes backups and checks archiving; it does **not** yet prove a backup restor
 
 ```mermaid
 mindmap
-  root((16 tests pass))
+  root((17 tests pass))
     Scheduling
       nothing runs early
       runs at the exact scheduled second
